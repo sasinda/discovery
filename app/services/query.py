@@ -48,14 +48,14 @@ class QueryBackend(object):
         pass
 
     @abc.abstractmethod
-    def get(self, service, ip_address):
+    def get(self, service, endpoint):
         """Fetches the single host associated with the given service and ip_address
 
         :param service: the service of the host to get
-        :param ip_address: the ip_address of the host to get
+        :param endpoint: the ip_address:port the host to get
 
         :type service: str
-        :type ip_address: str
+        :type endpoint: str
 
         :returns: a single host if one exists, None otherwise
         :rtype: dict
@@ -78,14 +78,14 @@ class QueryBackend(object):
         pass
 
     @abc.abstractmethod
-    def delete(self, service, ip_address):
+    def delete(self, service, endpoint):
         """Deletes the given host for the given service/ip_address
 
         :param service: the service of the host to delete
-        :param ip_address: the ip_address of the host to delete
+        :param endpoint: the ip_address:port of the host to delete
 
         :type service: str
-        :type ip_address: str
+        :type endpoint: str
 
         :returns: True if delete successful, False otherwise
         :rtype: bool
@@ -140,18 +140,18 @@ class MemoryQueryBackend(QueryBackend):
             if host['service_repo_name'] == service_repo_name:
                 yield host
 
-    def get(self, service, ip_address):
+    def get(self, service, endpoint):
         ip_map = self.data.get(service)
         if ip_map is None:
             return None
 
-        host_dict = ip_map.get(ip_address)
+        host_dict = ip_map.get(endpoint)
         if host_dict is None:
             return None
 
         host = host_dict.copy()
         host['service'] = service
-        host['ip_address'] = ip_address
+        host['ip_address'] = endpoint
         return host
 
     def put(self, host):
@@ -170,16 +170,16 @@ class MemoryQueryBackend(QueryBackend):
         ip_map[ip_address] = host_dict
         return True
 
-    def delete(self, service, ip_address):
+    def delete(self, service, endpoint):
         ip_map = self.data.get(service)
         if ip_map is None:
             return False
 
-        host_dict = ip_map.get(ip_address)
+        host_dict = ip_map.get(endpoint)
         if host_dict is None:
             return False
 
-        del ip_map[ip_address]
+        del ip_map[endpoint]
         if len(ip_map) == 0:
             del self.data[service]
         return True
@@ -203,8 +203,8 @@ class LocalFileQueryBackend(QueryBackend):
     def query_secondary_index(self, service_repo_name):
         return self.backend.query_secondary_index(service_repo_name)
 
-    def get(self, service, ip_address):
-        return self.backend.get(service, ip_address)
+    def get(self, service, endpoint):
+        return self.backend.get(service, endpoint)
 
     def put(self, host):
         try:
@@ -212,9 +212,9 @@ class LocalFileQueryBackend(QueryBackend):
         finally:
             self._save()
 
-    def delete(self, service, ip_address):
+    def delete(self, service, endpoint):
         try:
-            return self.backend.delete(service, ip_address)
+            return self.backend.delete(service, endpoint)
         finally:
             self._save()
 
@@ -226,9 +226,9 @@ class DynamoQueryBackend(QueryBackend):
     def query_secondary_index(self, service_repo_name):
         return self._read_cursor(Host.service_repo_name_index.query(service_repo_name))
 
-    def get(self, service, ip_address):
+    def get(self, service, endpoint):
         try:
-            host = Host.get(service, ip_address)
+            host = Host.get(service, endpoint)
             if host is None:
                 return None
             return self._pynamo_host_to_dict(host)
@@ -259,7 +259,7 @@ class DynamoQueryBackend(QueryBackend):
                 batch.save(self._dict_to_pynamo_host(host))
         return True
 
-    def delete(self, service, ip_address):
+    def delete(self, service, endpoint):
         """
         Technically we should not have several entries for the given service and ip address.
         But there is no guarantee that it must be the case. Here we verify that it's strictly
@@ -267,16 +267,16 @@ class DynamoQueryBackend(QueryBackend):
         """
 
         statsd = get_stats('service.host')
-        hosts = list(self._read_cursor(Host.query(service, ip_address__eq=ip_address)))
+        hosts = list(self._read_cursor(Host.query(service, endpoint__eq=endpoint)))
         if len(hosts) == 0:
             logging.error(
-                "Delete called for nonexistent host: service=%s ip=%s" % (service, ip_address)
+                "Delete called for nonexistent host: service=%s ip=%s" % (service, endpoint)
             )
             return False
         elif len(hosts) > 1:
             logging.error(
                 "Returned more than 1 result for query %s %s.  Aborting the delete"
-                % (service, ip_address)
+                % (service, endpoint)
             )
             return False
         else:
@@ -311,9 +311,10 @@ class DynamoQueryBackend(QueryBackend):
 
         _host = {}
         _host['service'] = host.service
-        _host['ip_address'] = host.ip_address
+        _host['endpoint']= host.endpoint
         _host['service_repo_name'] = host.service_repo_name
         _host['port'] = host.port
+        _host['ip_address'] = host.ip_address
         _host['revision'] = host.revision
         _host['last_check_in'] = host.last_check_in
         _host['tags'] = host.tags
@@ -333,6 +334,7 @@ class DynamoQueryBackend(QueryBackend):
         """
 
         return Host(service=host['service'],
+                    endpoint=host['endpoint'],
                     ip_address=host['ip_address'],
                     service_repo_name=host['service_repo_name'],
                     port=host['port'],

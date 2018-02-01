@@ -13,7 +13,7 @@ from .. import settings
 
 class HostService():
     """Provides methods for querying for hosts"""
-
+    
     def __init__(self, query_backend=query.DynamoQueryBackend()):
         """
         Initialize HostService against a given query backend.
@@ -36,7 +36,7 @@ class HostService():
         for host in hosts:
             if self._is_expired(host):
                 statsd = get_stats('service.host')
-                self.query_backend.delete(host['service'], host['ip_address'])
+                self.query_backend.delete(host['service'], host['endpoint'])
                 statsd.incr("sweep.%s" % host['service'])
             else:
                 _hosts.append(host)
@@ -288,20 +288,21 @@ class HostService():
         :returns: True on success, False on failure
         :rtype: bool
         """
-        host = self.query_backend.get(service, ip_address)
+        endpoint=ip_address+':'+str(port)
+        host = self.query_backend.get(service, endpoint)
         if host is None:
             host = {
                 'service': service,
+                'endpoint': endpoint,
                 'ip_address': ip_address,
-                'service_repo_name': service_repo_name,
                 'port': port,
+                'service_repo_name': service_repo_name,
                 'revision': revision,
                 'last_check_in': last_check_in,
                 'tags': tags
             }
         else:
             host['service_repo_name'] = service_repo_name
-            host['port'] = port
             host['revision'] = revision
             host['last_check_in'] = last_check_in
             host['tags'].update(tags)
